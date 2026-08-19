@@ -1,0 +1,63 @@
+name: Cloudflare Tunnel Runner (TEST)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup environment
+        run: |
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
+          chmod +x cloudflared
+          echo "cloudflared installed"
+
+      - name: Start services
+        run: |
+          exec > >(tee /tmp/workflow.log) 2>&1
+
+          # Start HTTP server
+          python3 -m http.server 8000 --directory /tmp &
+          echo "HTTP_UID=$!" >> $GITHUB_ENV
+          echo "HTTP server started on port 8000"
+          sleep 2
+
+          echo ""
+          echo "=========================================="
+          echo "Starting Cloudflare Quick Tunnel..."
+          echo "(No account needed)"
+          echo "=========================================="
+          echo ""
+
+          # Start cloudflared quick tunnel
+          ./cloudflared tunnel --url http://localhost:8000 &
+          echo "TUNNEL_PID=$!" >> $GITHUB_ENV
+
+          sleep 8
+
+          # Get tunnel URL
+          echo ""
+          echo "=========================================="
+          echo "  YOUR TUNNEL URL:"
+          echo "=========================================="
+          grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' /tmp/workflow.log | tail -1 || echo "Getting URL..."
+          echo "=========================================="
+          echo ""
+          echo "Access the URL above to reach your service!"
+          echo ""
+
+          # Keep alive for testing
+          sleep 60
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Stopping..."
+          [ -n "$HTTP_PID" ] && kill $HTTP_PID 2>/dev/null || true
+          [ -n "$TUNNEL_PID" ] && kill $TUNNEL_PID 2>/dev/null || true
