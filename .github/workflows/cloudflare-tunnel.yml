@@ -17,13 +17,12 @@ jobs:
           # Download and install cloudflared
           wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O cloudflared
           chmod +x cloudflared
-          echo "cloudflared installed successfully"
+          echo "cloudflared installed"
 
       - name: Start services
         run: |
-          # Redirect all output to both console and log file
+          # Redirect all output to log file
           exec > >(tee /tmp/workflow.log) 2>&1
-          set -x
 
           # Start HTTP server in background
           python3 -m http.server 8000 --directory /tmp &
@@ -34,48 +33,45 @@ jobs:
           sleep 3
 
           # Verify service is running
-          curl -s -o /dev/null -w "%{http_code}" http://localhost:8000 || echo "Service check"
+          echo "Testing HTTP server..."
+          curl -s http://localhost:8000 | head -c 100 || echo "Server ready"
 
           echo ""
           echo "=============================================="
           echo "Starting Cloudflare Tunnel..."
+          echo "(No account needed - using quick tunnel)"
           echo "=============================================="
           echo ""
 
-          # Start cloudflared tunnel - this keeps running and creates the tunnel
-          # The tunnel URL is printed to stdout
-          ./cloudflared tunnel --no-autoupdate --token ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }} &
+          # Start cloudflared quick tunnel - NO TOKEN NEEDED!
+          # This creates a temporary tunnel without Cloudflare account
+          ./cloudflared tunnel --url http://localhost:8000 &
           TUNNEL_PID=$!
           echo "TUNNEL_PID=$TUNNEL_PID" >> $GITHUB_ENV
-          echo "Cloudflared tunnel started (PID: $TUNNEL_PID)"
 
           sleep 10
 
-          # Extract and display the tunnel URL prominently
+          # Extract and display the tunnel URL
           echo ""
           echo "=============================================="
           echo "  CLOUDFLARE TUNNEL URL"
           echo "=============================================="
-          grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' /tmp/workflow.log | tail -1 || echo "Waiting for URL..."
+          TUNNEL_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' /tmp/workflow.log | tail -1)
+          echo "$TUNNEL_URL"
           echo "=============================================="
           echo ""
-          echo "You can now access your service at the URL above"
-          echo "The service will run for the duration of this workflow"
-          echo "Press Ctrl+C or cancel the workflow to stop"
+          echo "✅ Access your service at the URL above!"
+          echo "⏱️  Service will run for ~60 minutes"
+          echo "❌ Cancel workflow to stop"
           echo ""
 
-          # Keep the workflow alive - will run until timeout or cancellation
-          # This sleep allows the tunnel and service to keep running
-          sleep 3570  # ~60 minutes minus setup time
+          # Keep workflow alive
+          sleep 3540
 
       - name: Cleanup
         if: always()
         run: |
-          echo "Cleaning up services..."
-          if [ -n "${{ env.HTTP_PID }}" ]; then
-            kill ${{ env.HTTP_PID }} 2>/dev/null || true
-          fi
-          if [ -n "${{ env.TUNNEL_PID }}" ]; then
-            kill ${{ env.TUNNEL_PID }} 2>/dev/null || true
-          fi
-          echo "Cleanup complete"
+          echo "Stopping services..."
+          [ -n "$HTTP_PID" ] && kill $HTTP_PID 2>/dev/null || true
+          [ -n "$TUNNEL_PID" ] && kill $TUNNEL_PID 2>/dev/null || true
+          echo "Done"
